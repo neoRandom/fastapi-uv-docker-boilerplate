@@ -1,0 +1,130 @@
+
+networks:
+  app-network:
+    driver: bridge
+
+services:
+  web:
+    container_name: web
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    # restart: on-failure
+    secrets:
+      - database-password
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD_FILE=${POSTGRES_PASSWORD_FILE}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    
+    # healthcheck:
+    #   test: ["CMD", "curl -f --silent --show-error http://localhost:8000/health || exit 1"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 5
+    
+    develop:
+      watch:
+        - action: sync
+          path: ./app/src
+          target: /app/src
+          initial_sync: true
+          ignore:
+            - ./app/src/tests/
+        
+        - action: rebuild
+          path: ./app/uv.lock
+  
+  # worker:
+  #   container_name: worker
+  #   build:
+  #     context: ./app
+  #     dockerfile: Dockerfile
+  #   command: celery -A src.worker worker --loglevel=info
+  #   restart: on-failure
+  #   secrets:
+  #     - database-password
+  #   environment:
+  #     - POSTGRES_HOST=${POSTGRES_HOST}
+  #     - POSTGRES_PORT=${POSTGRES_PORT}
+  #     - POSTGRES_DB=${POSTGRES_DB}
+  #     - POSTGRES_USER=${POSTGRES_USER}
+  #     - POSTGRES_PASSWORD_FILE=${POSTGRES_PASSWORD_FILE}
+  #     - REDIS_HOST=${REDIS_HOST}
+  #     - REDIS_PORT=${REDIS_PORT}
+  #   depends_on:
+  #     database:
+  #       condition: service_healthy
+  #     cache:
+  #       condition: service_healthy
+    
+  #   develop:
+  #     watch:
+  #       - action: sync
+  #         path: ./app/src
+  #         target: /app/src
+  #         initial_sync: true
+  #         ignore:
+  #           - ./app/src/tests/
+        
+  #       - action: rebuild
+  #         path: ./app/uv.lock
+  
+  database:
+    container_name: database
+    image: postgres:18.1-alpine
+    restart: always
+    secrets:
+      - database-password
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD_FILE=${POSTGRES_PASSWORD_FILE}
+    expose:
+      - "5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    
+  cache:
+    container_name: cache
+    image: redis:7.2-alpine
+    restart: always
+    volumes:
+     - cache-data:/data
+    expose:
+     - "6379"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  database-data:
+  cache-data:
+
+secrets:
+  database-password:
+    file: ./database/password.txt
